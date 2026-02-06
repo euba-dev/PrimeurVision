@@ -1,23 +1,27 @@
 """
-Outil de curation du dataset YOLO - Projet Computer Vision
+Outil de curation du dataset YOLO - Projet PrimeurVision
 Perrine IBOUROI & Eugénie BARLET - M2 SISE
 
 Parcourir les images, accepter ou rejeter chacune.
 Objectif : 50 images acceptées par classe, 300 images max au total.
 L'état est sauvegardé dans curation_state.json (persistent entre les sessions).
 
-Lancer avec : streamlit run validate_dataset.py
+Gère les sources externes avec remapping automatique des class IDs.
+
+Lancer avec : streamlit run scripts/validate_dataset.py
 """
 
 import json
+import shutil
 import streamlit as st
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from collections import Counter
 
 # --- Configuration ---
-DATASET_DIR = Path(__file__).parent.parent / "dataset"
-STATE_FILE = Path(__file__).parent.parent / "curation_state.json"
+PROJECT_DIR = Path(__file__).parent.parent
+DATASET_DIR = PROJECT_DIR / "dataset"
+STATE_FILE = PROJECT_DIR / "curation_state.json"
 MAX_PER_CLASS = 50
 MAX_TOTAL = 300
 
@@ -38,6 +42,17 @@ CLASS_COLORS = {
     5: "#DC2626",
 }
 
+# Remapping des class IDs provenant de sources externes vers nos IDs
+EXTERNAL_CLASS_REMAP = {
+    8: 2,   # lemon -> citron
+    17: 5,  # tomato -> tomate
+}
+
+# Dossiers de sources externes à curer (images/ et labels/ en sous-dossiers)
+EXTERNAL_SOURCES = [
+    DATASET_DIR / "selected_images_lemon_tomato",
+]
+
 
 # --- Persistence ---
 def load_state() -> dict:
@@ -55,8 +70,8 @@ def save_state(state: dict):
 
 
 # --- Labels ---
-def load_labels(label_path: Path) -> list[tuple[int, float, float, float, float]]:
-    """Charge les annotations YOLO depuis un fichier .txt."""
+def load_labels(label_path: Path, remap: dict | None = None) -> list[tuple[int, float, float, float, float]]:
+    """Charge les annotations YOLO depuis un fichier .txt avec remapping optionnel."""
     annotations = []
     if not label_path.exists():
         return annotations
@@ -65,15 +80,17 @@ def load_labels(label_path: Path) -> list[tuple[int, float, float, float, float]
             parts = line.strip().split()
             if len(parts) == 5:
                 cls_id = int(parts[0])
+                if remap:
+                    cls_id = remap.get(cls_id, cls_id)
                 cx, cy, w, h = map(float, parts[1:])
                 annotations.append((cls_id, cx, cy, w, h))
     return annotations
 
 
-def get_classes_in_image(img_stem: str, labels_dir: Path) -> set[int]:
+def get_classes_in_image(img_stem: str, labels_dir: Path, remap: dict | None = None) -> set[int]:
     """Retourne les classes présentes dans une image."""
     label_path = labels_dir / (img_stem + ".txt")
-    annotations = load_labels(label_path)
+    annotations = load_labels(label_path, remap=remap)
     return {cls_id for cls_id, *_ in annotations}
 
 
@@ -110,53 +127,89 @@ def draw_boxes(image: Image.Image, annotations: list, line_width: int = 3) -> Im
 
 
 # --- Comptage ---
-def count_accepted_per_class(state: dict, all_labels_dirs: list[Path]) -> Counter:
+def resolve_label_info(img_key: str) -> tuple[Path, dict | None]:
+    """Retourne (labels_dir, remap) pour une clé d'image."""
+    prefix, stem = img_key.split("/", 1)
+    if prefix in ("train", "val"):
+        return DATASET_DIR / "labels" / prefix, None
+    else:
+        # Source externe : prefix = nom du dossier source
+        return DATASET_DIR / prefix / "labels", EXTERNAL_CLASS_REMAP
+
+
+def count_accepted_per_class(state: dict) -> Counter:
     """Compte les images acceptées par classe."""
     counts = Counter()
     for img_key in state["accepted"]:
-        # img_key = "train/000000001234" ou "val/000000001234"
-        split, stem = img_key.split("/", 1)
-        for labels_dir in all_labels_dirs:
-            if labels_dir.parent.name == split or split in str(labels_dir):
-                classes = get_classes_in_image(stem, labels_dir)
-                for cls_id in classes:
-                    counts[cls_id] += 1
-                break
-        else:
-            # Chercher dans tous les labels_dirs
-            for labels_dir in all_labels_dirs:
-                label_path = labels_dir / (stem + ".txt")
-                if label_path.exists():
-                    classes = get_classes_in_image(stem, labels_dir)
-                    for cls_id in classes:
-                        counts[cls_id] += 1
-                    break
+        labels_dir, remap = resolve_label_info(img_key)
+        _, stem = img_key.split("/", 1)
+        classes = get_classes_in_image(stem, labels_dir, remap=remap)
+        for cls_id in classes:
+            counts[cls_id] += 1
     return counts
 
 
-def build_image_list(all_labels_dirs: list[Path]) -> list[tuple[str, Path, Path]]:
-    """Construit la liste complète des images avec leur clé unique."""
+def build_image_list() -> list[tuple[str, Path, Path, dict | None]]:
+    """Construit la liste complète des images (dataset + sources externes)."""
     images = []
-    for labels_dir in all_labels_dirs:
-        split = labels_dir.name  # "train" ou "val"
+
+    # Images du dataset existant (train/val)
+    for split in ("train", "val"):
         images_dir = DATASET_DIR / "images" / split
-        for img_path in sorted(images_dir.glob("*.jpg")):
+        labels_dir = DATASET_DIR / "labels" / split
+        if not images_dir.exists():
+            continue
+        for img_path in sorted(images_dir.glob("*.jpg")) + sorted(images_dir.glob("*.png")):
             key = f"{split}/{img_path.stem}"
-            images.append((key, img_path, labels_dir))
-        for img_path in sorted(images_dir.glob("*.png")):
-            key = f"{split}/{img_path.stem}"
-            images.append((key, img_path, labels_dir))
+            images.append((key, img_path, labels_dir, None))
+
+    # Images des sources externes
+    for source_dir in EXTERNAL_SOURCES:
+        if not source_dir.exists():
+            continue
+        source_name = source_dir.name
+        images_dir = source_dir / "images"
+        labels_dir = source_dir / "labels"
+        if not images_dir.exists():
+            continue
+        for img_path in sorted(images_dir.glob("*.jpg")) + sorted(images_dir.glob("*.png")):
+            key = f"{source_name}/{img_path.stem}"
+            images.append((key, img_path, labels_dir, EXTERNAL_CLASS_REMAP))
+
     return images
 
 
-def should_skip(img_key: str, labels_dir: Path, state: dict, class_counts: Counter) -> bool:
+def should_skip(img_key: str, labels_dir: Path, class_counts: Counter, remap: dict | None) -> bool:
     """Vérifie si une image doit être sautée (toutes ses classes sont complètes)."""
-    split, stem = img_key.split("/", 1)
-    classes = get_classes_in_image(stem, labels_dir)
+    _, stem = img_key.split("/", 1)
+    classes = get_classes_in_image(stem, labels_dir, remap=remap)
     if not classes:
         return True
-    # Sauter si TOUTES les classes de l'image ont déjà atteint 50
     return all(class_counts.get(cls_id, 0) >= MAX_PER_CLASS for cls_id in classes)
+
+
+def integrate_image(img_key: str, img_path: Path, labels_dir: Path, remap: dict | None):
+    """Copie une image externe dans dataset/images/train et son label remappé."""
+    _, stem = img_key.split("/", 1)
+    prefix = img_key.split("/", 1)[0]
+
+    # Les images déjà dans train/val n'ont pas besoin d'être copiées
+    if prefix in ("train", "val"):
+        return
+
+    # Copier l'image dans train
+    dest_img = DATASET_DIR / "images" / "train" / img_path.name
+    if not dest_img.exists():
+        shutil.copy2(img_path, dest_img)
+
+    # Créer le label remappé
+    src_label = labels_dir / (stem + ".txt")
+    dest_label = DATASET_DIR / "labels" / "train" / (stem + ".txt")
+    if src_label.exists() and not dest_label.exists():
+        annotations = load_labels(src_label, remap=remap)
+        with open(dest_label, "w") as f:
+            for cls_id, cx, cy, w, h in annotations:
+                f.write(f"{cls_id} {cx} {cy} {w} {h}\n")
 
 
 # --- Interface Streamlit ---
@@ -167,17 +220,11 @@ if "state" not in st.session_state:
     st.session_state.state = load_state()
 state = st.session_state.state
 
-# Répertoires labels
-all_labels_dirs = [
-    DATASET_DIR / "labels" / "train",
-    DATASET_DIR / "labels" / "val",
-]
-
-# Toutes les images
-all_images = build_image_list(all_labels_dirs)
+# Toutes les images (dataset + sources externes)
+all_images = build_image_list()
 
 # Comptage actuel
-class_counts = count_accepted_per_class(state, all_labels_dirs)
+class_counts = count_accepted_per_class(state)
 total_accepted = len(state["accepted"])
 
 # --- Vérifier si objectif atteint ---
@@ -200,12 +247,12 @@ if total_accepted >= MAX_TOTAL or all_classes_full:
 
 # --- Filtrer les images à traiter ---
 pending_images = []
-for key, img_path, labels_dir in all_images:
+for key, img_path, labels_dir, remap in all_images:
     if key in state["accepted"] or key in state["rejected"]:
         continue
-    if should_skip(key, labels_dir, state, class_counts):
+    if should_skip(key, labels_dir, class_counts, remap):
         continue
-    pending_images.append((key, img_path, labels_dir))
+    pending_images.append((key, img_path, labels_dir, remap))
 
 if not pending_images:
     st.title("Plus d'images a traiter")
@@ -220,10 +267,10 @@ if "cursor" not in st.session_state:
     st.session_state.cursor = 0
 cursor = min(st.session_state.cursor, len(pending_images) - 1)
 
-img_key, img_path, labels_dir = pending_images[cursor]
-split, stem = img_key.split("/", 1)
+img_key, img_path, labels_dir, remap = pending_images[cursor]
+_, stem = img_key.split("/", 1)
 label_path = labels_dir / (stem + ".txt")
-annotations = load_labels(label_path)
+annotations = load_labels(label_path, remap=remap)
 classes_in_img = {cls_id for cls_id, *_ in annotations}
 
 # === SIDEBAR ===
@@ -264,11 +311,22 @@ with st.sidebar:
 # === ZONE PRINCIPALE ===
 st.title("Curation du Dataset")
 
+# Source de l'image
+source_prefix = img_key.split("/", 1)[0]
+source_badge = ""
+if source_prefix not in ("train", "val"):
+    source_badge = (
+        f' <span style="background-color:#3B82F6; color:white; '
+        f'padding:2px 8px; border-radius:8px; font-size:0.8em;">'
+        f'source: {source_prefix}</span>'
+    )
+
 # Info image
 st.markdown(
     f"**Image {cursor + 1} / {len(pending_images)} restantes** — "
-    f"`{split}/{img_path.name}` — "
-    f"**{len(annotations)} annotation(s)**"
+    f"`{img_path.name}`{source_badge} — "
+    f"**{len(annotations)} annotation(s)**",
+    unsafe_allow_html=True,
 )
 
 # Classes présentes avec badge
@@ -318,8 +376,10 @@ col_reject, col_skip, col_accept = st.columns([1, 1, 1])
 with col_accept:
     if st.button("✅ Accepter", use_container_width=True, type="primary"):
         state["accepted"].append(img_key)
+        # Si source externe, copier dans dataset/images/train avec label remappé
+        integrate_image(img_key, img_path, labels_dir, remap)
         save_state(state)
-        st.session_state.cursor = cursor  # reste au même index (la liste se décale)
+        st.session_state.cursor = cursor
         st.rerun()
 
 with col_reject:
