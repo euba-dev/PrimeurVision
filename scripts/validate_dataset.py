@@ -42,15 +42,26 @@ CLASS_COLORS = {
     5: "#DC2626",
 }
 
-# Remapping des class IDs provenant de sources externes vers nos IDs
-EXTERNAL_CLASS_REMAP = {
-    8: 2,   # lemon -> citron
-    17: 5,  # tomato -> tomate
+# Remapping par source externe : {nom_dossier: {id_source: id_dest}}
+SOURCE_REMAPS = {
+    "selected_images_lemon_tomato": {
+        8: 2,   # lemon -> citron
+        17: 5,  # tomato -> tomate
+    },
+    "lvis_to_curate": {
+        14: 0,  # carrot -> carotte
+        26: 1,  # eggplant -> aubergine
+        37: 2,  # lemon -> citron
+        52: 3,  # potato -> pomme_de_terre
+        55: 4,  # radish -> radis
+        59: 5,  # tomato -> tomate
+    },
 }
 
 # Dossiers de sources externes à curer (images/ et labels/ en sous-dossiers)
 EXTERNAL_SOURCES = [
     DATASET_DIR / "selected_images_lemon_tomato",
+    DATASET_DIR / "lvis_to_curate",
 ]
 
 
@@ -71,7 +82,8 @@ def save_state(state: dict):
 
 # --- Labels ---
 def load_labels(label_path: Path, remap: dict | None = None) -> list[tuple[int, float, float, float, float]]:
-    """Charge les annotations YOLO depuis un fichier .txt avec remapping optionnel."""
+    """Charge les annotations YOLO depuis un fichier .txt avec remapping optionnel.
+    Si remap est fourni, seules les classes présentes dans le remap sont gardées."""
     annotations = []
     if not label_path.exists():
         return annotations
@@ -81,7 +93,9 @@ def load_labels(label_path: Path, remap: dict | None = None) -> list[tuple[int, 
             if len(parts) == 5:
                 cls_id = int(parts[0])
                 if remap:
-                    cls_id = remap.get(cls_id, cls_id)
+                    if cls_id not in remap:
+                        continue  # ignorer les classes hors cible
+                    cls_id = remap[cls_id]
                 cx, cy, w, h = map(float, parts[1:])
                 annotations.append((cls_id, cx, cy, w, h))
     return annotations
@@ -134,7 +148,7 @@ def resolve_label_info(img_key: str) -> tuple[Path, dict | None]:
         return DATASET_DIR / "labels" / prefix, None
     else:
         # Source externe : prefix = nom du dossier source
-        return DATASET_DIR / prefix / "labels", EXTERNAL_CLASS_REMAP
+        return DATASET_DIR / prefix / "labels", SOURCE_REMAPS.get(prefix)
 
 
 def count_accepted_per_class(state: dict) -> Counter:
@@ -174,7 +188,7 @@ def build_image_list() -> list[tuple[str, Path, Path, dict | None]]:
             continue
         for img_path in sorted(images_dir.glob("*.jpg")) + sorted(images_dir.glob("*.png")):
             key = f"{source_name}/{img_path.stem}"
-            images.append((key, img_path, labels_dir, EXTERNAL_CLASS_REMAP))
+            images.append((key, img_path, labels_dir, SOURCE_REMAPS.get(source_name)))
 
     return images
 
