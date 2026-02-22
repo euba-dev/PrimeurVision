@@ -18,6 +18,38 @@
 
 ---
 
+## Outil de curation du dataset — Streamlit
+
+Pour valider manuellement les images issues de sources hétérogènes (LVIS, Kaggle, Roboflow, GitHub), une interface de revue interactive a été développée avec **Streamlit** (`scripts/review_grid.py`).
+
+### Fonctionnement
+
+```bash
+streamlit run scripts/review_grid.py
+```
+
+L'interface affiche les images du dataset organisées **par classe**, sous forme de grille. Pour chaque image :
+- Les **bounding boxes annotées** sont dessinées avec la couleur de la classe correspondante
+- Un bouton **"Retirer"** permet de supprimer l'image (fichier image + label) directement depuis l'interface
+- Les images apparaissent dans **toutes les classes** qu'elles contiennent (une image avec carotte + radis apparaît dans les deux onglets)
+
+### Utilité
+
+Cet outil a permis de :
+1. **Détecter les mauvaises annotations** issues des sources externes (mauvais remapping de classes, objets mal encadrés)
+2. **Équilibrer visuellement le dataset** — identifier rapidement les classes sous-représentées
+3. **Valider l'intégration** des 3 sources externes (nouveau_dataset, complement_d-images, LVIS) après remapping des IDs de classes
+
+### Implémentation technique
+
+- Lecture directe du dossier `dataset/images/train/` (pas de fichier d'état intermédiaire)
+- Parsing des labels YOLO (format `class cx cy w h` normalisé)
+- Dessin des boîtes sur PIL avec couleurs par classe
+- Suppression atomique image + label au clic
+- Compatible multi-labels (une image peut appartenir à plusieurs classes)
+
+---
+
 ## Modèle v1 — YOLOv8n (baseline)
 
 **Configuration :**
