@@ -126,25 +126,23 @@ if "state" not in st.session_state:
     st.session_state.state = load_state()
 state = st.session_state.state
 
-# Indexer les images acceptées par classe (dédupliquées par stem)
-seen_stems = set()
-images_by_class = defaultdict(list)  # {cls_id: [(img_key, img_path, label_path, remap)]}
+# Indexer TOUTES les images présentes dans train/ (pas seulement celles du state)
+images_by_class = defaultdict(list)
+train_img_dir = DATASET_DIR / "images" / "train"
+train_lbl_dir = DATASET_DIR / "labels" / "train"
 
-for img_key in state["accepted"]:
-    _, stem = img_key.split("/", 1)
-    if stem in seen_stems:
+for img_path in sorted(train_img_dir.glob("*.*")):
+    if img_path.suffix.lower() not in (".jpg", ".jpeg", ".png"):
         continue
-    seen_stems.add(stem)
-
-    img_path, label_path, remap = resolve_image_info(img_key)
-    if img_path is None:
-        continue
-
-    annotations = load_labels(label_path, remap=remap)
+    stem = img_path.stem
+    label_path = train_lbl_dir / (stem + ".txt")
+    annotations = load_labels(label_path, remap=None)
     classes = {cls_id for cls_id, *_ in annotations}
     for cls_id in classes:
         if cls_id in CLASS_NAMES:
-            images_by_class[cls_id].append((img_key, stem, img_path, label_path, remap))
+            images_by_class[cls_id].append((f"train/{stem}", stem, img_path, label_path, None))
+
+seen_stems = {item[1] for items in images_by_class.values() for item in items}
 
 # Sidebar : choix de classe
 with st.sidebar:
@@ -231,16 +229,6 @@ n_remove = len(st.session_state.to_remove)
 if n_remove > 0:
     st.warning(f"{n_remove} image(s) marquée(s) pour retrait.")
     if st.button(f"Confirmer le retrait de {n_remove} image(s)", type="primary"):
-        # Déplacer de accepted vers rejected
-        new_accepted = []
-        for key in state["accepted"]:
-            _, stem = key.split("/", 1)
-            if stem in st.session_state.to_remove:
-                state["rejected"].append(key)
-            else:
-                new_accepted.append(key)
-        state["accepted"] = new_accepted
-
         # Supprimer les fichiers physiques de train/
         for stem in st.session_state.to_remove:
             for ext in (".jpg", ".jpeg", ".png"):
@@ -251,7 +239,5 @@ if n_remove > 0:
             if p.exists():
                 p.unlink()
 
-        save_state(state)
-        st.session_state.state = state
         st.session_state.to_remove = set()
         st.rerun()

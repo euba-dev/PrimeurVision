@@ -14,6 +14,7 @@
 path: ./dataset
 train: images/train
 val: images/val
+test: images/test
 
 names:
   0: carotte
@@ -23,7 +24,8 @@ names:
   4: radis
   5: tomate
 
-# Statistiques (apres curation)
-# Train: 90 images
-# Val: 18 images
-# Total: 108 images
+# Statistiques (apres split 70/15/15 stratifie)
+# Train: 166 images
+# Val:    36 images
+# Test:   36 images
+# Total: 238 images
