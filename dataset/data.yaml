@@ -1,21 +1,3 @@
-# Dataset Fruits et Legumes - Projet PrimeurVision
-# Cree automatiquement par scripts/create_dataset.py
-#
-# Sources :
-#   1. LVIS (Large Vocabulary Instance Segmentation) - https://www.lvisdataset.org/
-#      Sous-ensemble extrait via scripts/create_dataset.py (6 classes, format YOLO)
-#   2. Fruits and Vegetables Image Recognition Dataset (Kaggle)
-#      https://www.kaggle.com/datasets/kritikseth/fruit-and-vegetable-image-recognition
-#   3. Fruit and Vegetable (Roboflow Universe)
-#      https://universe.roboflow.com/cse299/fruit-and-vegetable/
-#   4. Fruits-And-Vegetables-Detection-Dataset (GitHub)
-#      https://github.com/henningheyen/Fruits-And-Vegetables-Detection-Dataset/
-
-path: ./dataset
-train: images/train
-val: images/val
-test: images/test
-
 names:
   0: carotte
   1: aubergine
@@ -23,9 +5,8 @@ names:
   3: pomme_de_terre
   4: radis
   5: tomate
-
-# Statistiques (apres split 70/15/15 stratifie)
-# Train: 166 images
-# Val:    36 images
-# Test:   36 images
-# Total: 238 images
+path: /Users/eugenie/Desktop/M2-SISE/13 - Deep learning - Machine learning - Computer
+  Vision/projet_computer_vision/dataset
+test: images/test
+train: images/train
+val: images/val
