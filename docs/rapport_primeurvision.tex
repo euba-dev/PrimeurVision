@@ -1,0 +1,471 @@
+\documentclass{article}
+\usepackage{graphicx}
+
+% Packages
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{caption}
+\captionsetup{labelsep=endash}
+
+% Configuration de la page
+\geometry{margin=2.5cm}
+
+% Configuration des listings
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10}
+}
+
+% Métadonnées
+\title{\vspace{2cm}
+        \textbf{PrimeurVision\\ Détection de fruits et légumes }\\
+        \vspace{3cm}
+        \Large \textbf{Master 2 Statistiques et Informatique \\ pour la Science des données\\}
+        \vspace{3cm}
+
+        \includegraphics[width=5cm]{logos/univlyon2_logo201806-standard.png}}
+
+\author{\vspace{3cm}\\Eugénie BARLET \\Perrine IBOUROI}
+\date{Février 2026}
+
+
+\begin{document}
+\pagenumbering{gobble}
+\maketitle
+\newpage
+\tableofcontents
+\newpage
+\pagenumbering{arabic}
+
+% ============================================================
+\section{Introduction}
+% ============================================================
+
+La grande distribution et les marchés alimentaires manipulent quotidiennement une grande variété de fruits et légumes. Automatiser leur identification constitue un enjeu pratique concret : gestion des stocks, caisses automatiques, tri qualité. Ce projet s'inscrit dans ce contexte en développant \textbf{PrimeurVision}, un système de détection d'objets capable d'identifier six classes de légumes dans des images réelles.
+
+L'objectif est de réaliser un \textit{fine-tuning} d'un modèle pré-entraîné de type YOLOv8 sur un dataset constitué pour l'occasion. L'apprentissage par transfert permet de bénéficier des représentations visuelles génériques apprises sur de larges corpus, tout en les spécialisant efficacement sur notre domaine cible avec un volume de données limité.
+
+Le dataset couvre six classes : \textbf{carotte, aubergine, citron, pomme de terre, radis et tomate}. L'ensemble du pipeline — construction du dataset, entraînement, évaluation — est documenté dans deux notebooks Jupyter dédiés.
+
+% ============================================================
+\section{Constitution du dataset}
+% ============================================================
+
+La robustesse d'un modèle de détection dépend de la diversité et du volume de son jeu de données. Pour ce projet, nous avons adopté une approche hybride combinant des données pré-existantes et une collecte ciblée.
+
+Le dataset final de 238 images est issu de la fusion de trois sources distinctes :
+\begin{itemize}[label=\textbullet]
+    \item \textbf{Roboflow} : jeux de données déjà étiquetés pour les classes citron et tomate.
+    \item \textbf{LVIS Fruits and Vegetables Dataset} (Kaggle) : dataset issu du corpus LVIS (Large Vocabulary Instance Segmentation) dont nous avons extrait et curé les annotations correspondant à nos six classes.
+    \item \textbf{Collecte manuelle} (Google Images et Unsplash) : images collectées sur le web pour compléter les catégories en minorité dans le dataset (radis, aubergines etc.) pour lesquelles la présence dans des datasets existants est plus rare.
+\end{itemize}
+
+L'ensemble a été uniformisé : chaque image est associée à un fichier \texttt{.txt} au format YOLO, et les identifiants de classes ont été remappés pour être cohérents entre toutes les sources.
+
+\subsection{Annotation des images collectées}
+
+Pour les images issues de la collecte manuelle ne disposant pas de labels, une phase d'annotation a été nécessaire afin de les intégrer au dataset global.
+
+Nous avons utilisé la plateforme open-source \textbf{CVAT (Computer Vision Annotation Tool)}. Le workflow a été le suivant : définition des labels (\textit{eggplant, carrot, potato, lemon, raddish}), importation des images brutes, et détourage par \textit{bounding boxes}.
+
+L'annotation a été réalisée manuellement via l'interface de CVAT pour garantir une précision optimale. Pour chaque instance, nous avons tracé une boîte englobante définie par quatre points cardinaux. Nous avons ajusté chaque cadre pour affleurer les bords du légume en évitant d'inclure du bruit contextuel (arrière-plan). Ceci permet au modèle de dissocier correctement l'objet de son environnement lors de l'apprentissage.
+
+Les annotations ont été exportées au format \textbf{YOLO 1.1}. Ce format traduit les coordonnées des boîtes en valeurs numériques normalisées entre 0 et 1.
+
+Une fois l'exportation terminée, les nouveaux fichiers de labels ont été fusionnés avec ceux des sources Roboflow et LVIS. Le répertoire final est organisé avec deux dossiers miroirs (\texttt{/images} et \texttt{/labels}), accompagnés du fichier \texttt{data.yaml} servant de configuration au modèle.
+
+\subsection{Curation interactive du dataset — Streamlit}
+
+L'intégration de sources hétérogènes (LVIS, Kaggle, Roboflow, collecte manuelle) implique un risque d'erreurs silencieuses : mauvais remapping des identifiants de classes, boîtes mal placées, images hors contexte. Pour détecter et corriger ces problèmes, nous avons développé une interface de revue interactive avec \textbf{Streamlit} (\texttt{scripts/review\_grid.py}).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\textwidth]{img/streamlit_curation.png}
+    \caption{Interface Streamlit de curation du dataset — vue grille par classe avec bounding boxes}
+    \label{fig:streamlit}
+\end{figure}
+
+L'interface affiche les images organisées \textbf{par classe} sous forme de grille. Pour chaque image, les bounding boxes annotées sont dessinées avec la couleur de la classe correspondante. Un bouton \textit{Retirer} permet de supprimer simultanément le fichier image et son label en un clic. Les images contenant plusieurs classes apparaissent dans tous les onglets concernés.
+
+Cet outil a permis de :
+\begin{enumerate}
+    \item \textbf{Détecter les erreurs de remapping} — identifier visuellement les images dont les labels ne correspondent pas à ce qui est affiché.
+    \item \textbf{Contrôler la qualité des annotations} — repérer les boîtes trop larges, trop petites ou décalées.
+    \item \textbf{Équilibrer le dataset} — visualiser rapidement les classes sous-représentées et orienter la collecte complémentaire.
+\end{enumerate}
+
+\subsection{Augmentation des données}
+
+Certaines classes présentaient un nombre d'images insuffisant pour garantir un apprentissage robuste, même après avoir ajouté des images individuelles trouvées sur internet. Nous avons donc décidé d'appliquer de l'augmentation de données sur les classes sous-représentées. Étant donné la quantité d'images qu'il fallait transformer, nous avons choisi de réaliser l'augmentation des données via un script Python.
+
+Le script permet d'augmenter la quantité d'images en combinant systématiquement des transformations géométriques (rotation aléatoire entre $-40°$ et $+40°$, flip horizontal) et photométriques (luminosité, contraste, saturation), auxquelles s'ajoutent 2 ou 3 transformations supplémentaires tirées aléatoirement parmi : recadrage/zoom, décalage colorimétrique, correction gamma, flou ou accentuation, et bruit. Cette combinaison garantit que chaque image synthétique est visuellement distincte de son originale, tout en restant réaliste.
+
+\subsection{Répartition train / val / test}
+
+Le dataset a été découpé en trois sous-ensembles distincts. Le jeu d'entraînement sert à ajuster les poids du modèle ; le jeu de validation permet de surveiller la progression à chaque epoch et de détecter un éventuel surapprentissage sans jamais influencer l'apprentissage. À la fin de chaque epoch, le modèle fait des prédictions sur les images de validation. Le jeu de test, mis de côté jusqu'à la fin, fournit une évaluation objective des performances réelles du modèle.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Split} & \textbf{Rôle} & \textbf{Proportion} & \textbf{Nombre d'images} \\
+\midrule
+Train & Apprentissage des poids            & 70\% & 166 \\
+Val   & Suivi de l'entraînement            & 15\% & 36  \\
+Test  & Évaluation finale                  & 15\% & 36  \\
+\bottomrule
+\end{tabular}
+\caption{Répartition stratifiée du dataset (seed=42)}
+\end{table}
+
+Le split est stratifié : chaque classe est représentée proportionnellement dans chacun des trois sous-ensembles, soit environ 6 images par classe pour la validation et le test. Le jeu de test n'est jamais utilisé pendant l'entraînement, ce qui garantit que les métriques finales reflètent fidèlement la capacité de généralisation du modèle.
+
+% ============================================================
+\section{Architecture du modèle : YOLOv8}
+% ============================================================
+
+\subsection{Pourquoi YOLO ?}
+
+Pour la phase de reconnaissance d'objets, nous avons choisi d'utiliser l'architecture YOLO (You Only Look Once). Ce modèle est reconnu pour sa capacité à détecter des objets en une seule analyse de l'image, ce qui le rend particulièrement rapide.
+
+Ce choix s'explique par son bon compromis entre la vitesse d'exécution (compatible avec une utilisation en temps réel), la précision de détection, et la simplicité d'intégration dans un environnement comme Google Colab.
+
+Nous avons retenu YOLOv8 (par Ultralytics), car il s'agit de la version la plus aboutie disponible au moment du projet.
+
+YOLOv8 propose des améliorations par rapport aux versions précédentes, notamment en termes de précision et de stabilité de l'entraînement, tout en conservant une grande rapidité d'inférence.
+
+\subsection{Variantes testées}
+
+Nous avons entraîné et comparé deux variantes pour trouver le modèle qui nous fournirait les meilleurs résultats :
+
+\begin{itemize}[label=\textbullet]
+    \item \textbf{YOLOv8n} (\textit{nano}, 3M paramètres) : modèle léger, adapté à notre dataset de taille limitée.
+    \item \textbf{YOLOv8s} (\textit{small}, 11M paramètres) : testé avec des hyperparamètres améliorés (augmentation supplémentaire, label smoothing, plus d'epochs) pour évaluer si plus de capacité apporte un gain.
+\end{itemize}
+
+La comparaison des résultats sur le test a permis de sélectionner le meilleur modèle : YOLOv8n (cf. section Résultats).
+
+\subsection{Structure de l'architecture}
+
+Le modèle YOLOv8n est organisé en trois grandes parties fonctionnelles :
+
+\begin{enumerate}
+    \item \textbf{Backbone (extraction de caractéristiques)} :
+    cette partie analyse l'image d'entrée et extrait progressivement
+    des informations visuelles importantes (contours, textures, formes).
+    Le backbone utilisé est pré-entraîné sur le jeu de données COCO,
+    ce qui permet de bénéficier d'un apprentissage préalable sur
+    un grand nombre d'images variées.
+
+    \item \textbf{Neck (fusion multi-échelle)} :
+    cette étape combine les informations issues de différentes profondeurs
+    du réseau afin de permettre la détection d'objets de tailles variées.
+
+    \item \textbf{Tête de détection} :
+    partie finale du modèle, elle prédit pour chaque objet détecté
+    sa position dans l'image (boîte englobante) ainsi que sa classe.
+\end{enumerate}
+
+Cette organisation en trois blocs permet de séparer
+l'extraction d'informations visuelles, leur combinaison
+et la prédiction finale.
+
+% ============================================================
+\section{Apprentissage par transfert}
+% ============================================================
+
+\subsection{Principe}
+
+Entraîner un réseau de détection depuis zéro nécessite des centaines de milliers d'images. Notre dataset étant de taille limitée, nous avons recours à l'apprentissage par transfert (\textit{transfer learning}) : on part d'un modèle YOLOv8n pré-entraîné sur COCO (330 000 images, 80 classes) et on adapte ses poids à notre tâche spécifique.
+
+Le modèle a déjà appris à reconnaître des formes, des textures et des objets génériques. Il ne reste qu'à spécialiser ces représentations sur nos six classes de légumes — ce qui nécessite bien moins de données et de temps de calcul.
+
+\subsection{Stratégie en deux phases}
+
+Nous avons adopté une stratégie d'entraînement en deux phases, pour ne pas dégrader les poids pré-entraînés et éviter le surapprentissage :
+
+\paragraph{Phase 1 — Backbone gelé}
+
+Le backbone (les 10 premières couches) est gelé : ses poids ne sont pas mis à jour. Seule la tête de détection apprend. Cela permet à la tête de s'adapter à nos classes sans dégrader les représentations génériques déjà apprises. Le learning rate peut être plus élevé car seule une petite partie du réseau est mise à jour.
+
+\paragraph{Phase 2 — Fine-tuning complet}
+
+Toutes les couches sont dégelées. L'ensemble du réseau est affiné avec un learning rate plus faible pour ne pas effacer les poids pré-entraînés. Cette phase permet d'ajuster finement le backbone à nos images spécifiques (éclairage, fond, angle de vue).
+
+% ============================================================
+\section{Hyperparamètres et justifications}
+% ============================================================
+
+\begin{longtable}{llp{7cm}}
+\toprule
+\textbf{Hyperparamètre} & \textbf{Valeur} & \textbf{Justification} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Hyperparamètre} & \textbf{Valeur} & \textbf{Justification} \\
+\midrule
+\endhead
+\midrule
+\endfoot
+\bottomrule
+\endlastfoot
+\texttt{IMG\_SIZE} & 640 & Taille standard pour YOLOv8 ; compromis entre résolution spatiale et vitesse d'entraînement. Permet la comparaison avec les benchmarks officiels. \\[4pt]
+
+\texttt{BATCH\_SIZE} & 16 & Choisi en fonction des contraintes mémoire afin d'éviter les erreurs de dépassement mémoire. \\[4pt]
+
+\texttt{FREEZE\_LAYERS} & 10 & Gèle l'ensemble du backbone pré-entraîné durant la phase 1 afin de préserver les représentations génériques apprises sur COCO. \\[4pt]
+
+\texttt{PHASE1\_EPOCHS} & 10 & Nombre d'epochs limité car seule la tête de détection est entraînée ; une convergence relativement rapide est attendue. \\[4pt]
+
+\texttt{PHASE1\_LR} & $10^{-2}$ & Taux d'apprentissage plus élevé car seule la tête (initialisée aléatoirement) est optimisée. \\[4pt]
+
+\texttt{PHASE2\_EPOCHS} & 40 & Nombre d'epochs supérieur à la phase 1 car l'ensemble du réseau est entraîné ; un ajustement progressif des poids nécessite davantage d'itérations. \\[4pt]
+
+\texttt{PHASE2\_LR} & $10^{-3}$ & Taux d'apprentissage réduit pour affiner les poids pré-entraînés sans dégrader les connaissances acquises. \\[4pt]
+
+\texttt{PATIENCE} & 10 / 15 & Early stopping : 10 epochs en phase 1 (convergence rapide attendue), 15 en phase 2 afin de laisser le modèle stabiliser l'optimisation complète. \\[4pt]
+
+\texttt{CONF\_THRESHOLD} & 0.25 & Seuil standard pour l'inférence : les prédictions dont la confiance est inférieure sont filtrées. \\
+\end{longtable}
+\addtocounter{table}{-1}
+\captionof{table}{Hyperparamètres utilisés et justification des choix}
+
+% ============================================================
+\section{Métriques d'évaluation}
+% ============================================================
+
+Les métriques retenues sont les métriques standard de la détection d'objets. Une détection est considérée correcte si la boîte prédite chevauche suffisamment la boîte réelle. Nous pouvons le mesurer par l'« Intersection over Union » :
+
+\begin{equation}
+    \text{IoU} = \frac{\text{Aire}(\hat{B} \cap B)}{\text{Aire}(\hat{B} \cup B)}
+\end{equation}
+
+où $\hat{B}$ est la boîte prédite et $B$ la boîte réelle.
+
+\begin{itemize}
+
+    \item \textbf{mAP@50} : moyenne de la précision sur l'ensemble des classes avec un seuil IoU fixé à 0.5.
+    Il s'agit de la métrique principale en détection d'objets.
+    Elle permet de vérifier que les objets sont correctement localisés et classifiés.
+
+    \item \textbf{mAP@50-95} : moyenne des mAP calculées pour plusieurs seuils IoU compris entre 0.5 et 0.95.
+    Cette métrique est plus exigeante car elle demande une localisation plus précise des boîtes englobantes.
+
+    \item \textbf{Précision} : proportion de détections correctes parmi toutes les prédictions du modèle.
+    Une faible précision signifie qu'il y a beaucoup de fausses détections.
+
+    \item \textbf{Recall} : proportion d'objets réellement présents qui ont été détectés par le modèle.
+    Un recall faible indique que certains objets ne sont pas détectés.
+
+    \item \textbf{AP@50 par classe} : score individuel pour chaque catégorie.
+    Cette mesure permet d'identifier les classes pour lesquelles le modèle rencontre le plus de difficultés.
+
+\end{itemize}
+
+% ============================================================
+\section{Résultats}
+% ============================================================
+
+Nous avons entraîné deux modèles : un YOLOv8n (baseline) et un YOLOv8s (avec hyperparamètres améliorés). Le tableau \ref{tab:comparaison} présente une comparaison directe sur le jeu de test.
+
+\subsection{Modèle v1 — YOLOv8n (baseline)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Split} & \textbf{mAP@50} & \textbf{mAP@50-95} & \textbf{Précision} & \textbf{Recall} \\
+\midrule
+Validation & 0.4935 & 0.3241 & 0.5331 & 0.4619 \\
+Test       & 0.4552 & 0.3112 & 0.5015 & 0.4313 \\
+\bottomrule
+\end{tabular}
+\caption{Métriques v1 (YOLOv8n)}
+\end{table}
+
+Le modèle obtient une mAP@50 de 0.46 sur le test, proche de celle obtenue en validation (0.49), ce qui indique une bonne capacité de généralisation sans surapprentissage. La précision (0.50) et le recall (0.43) restent modérés : le modèle détecte correctement environ la moitié des objets présents, mais en rate encore une part significative.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Classe} & \textbf{AP@50 (test)} & \textbf{Recall estimé} \\
+\midrule
+Carotte         & 0.3301 & $\sim$33\% \\
+Aubergine       & 0.4823 & $\sim$9\%  \\
+Citron          & 0.5321 & $\sim$58\% \\
+Pomme de terre  & 0.6951 & $\sim$83\% \\
+Radis           & 0.2806 & $\sim$18\% \\
+Tomate          & 0.4109 & $\sim$59\% \\
+\midrule
+\textbf{mAP@50} & \textbf{0.4552} & \\
+\bottomrule
+\end{tabular}
+\caption{AP@50 et recall estimé par classe sur le test (v1)}
+\end{table}
+
+Les performances sont très hétérogènes selon les classes. La pomme de terre (0.70) et le citron (0.53) sont bien détectés, grâce à leurs caractéristiques visuelles distinctives. À l'inverse, le radis (0.28) et la carotte (0.33) posent plus de difficultés.
+
+Les figures \ref{fig:courbes_v1} et \ref{fig:confusion_v1} présentent les courbes d'entraînement et la matrice de confusion du modèle v1.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{img/results.png}
+    \caption{Courbes d'entraînement — YOLOv8n (phase 2)}
+    \label{fig:courbes_v1}
+\end{figure}
+
+Observons les courbes box (position de la boîte), cls (classification) et dfl (précision des bordures) :
+
+\begin{itemize}
+    \item \textbf{Losses sur les données d'entraînement (box, cls, dfl)} : les trois courbes diminuent régulièrement tout au long de la phase 2, ce qui indique que le modèle apprend correctement sur le dataset d'entraînement.
+
+    \item \textbf{Losses sur les données de validation} : le comportement est plus instable. La val/box\_loss et la val/dfl\_loss augmentent légèrement en fin de phase 2, ce qui traduit un début de surapprentissage, tandis que la val/cls\_loss décroît de façon stable, montrant que la classification continue de s'améliorer.
+
+    \item \textbf{Précision et recall} : les deux métriques progressent globalement, mais présentent une forte variabilité d'une epoch à l'autre, typique d'un dataset de validation de petite taille (36 images). Le recall (0.50 en fin d'entraînement) reste inférieur à la précision, ce qui indique que le modèle ne détecte pas encore tous les objets présents.
+
+    \item \textbf{mAP@50 et mAP@50-95} : ces métriques augmentent tout au long de la phase 2 sans atteindre de plateau net, ce qui suggère que le modèle n'avait pas totalement convergé à la fin des 40 epochs. Un léger allongement du nombre d'epochs ou de la patience aurait probablement permis d'améliorer encore les performances.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{img/confusion_matrix_normalized.png}
+    \caption{Matrice de confusion normalisée — YOLOv8n (test)}
+    \label{fig:confusion_v1}
+\end{figure}
+
+La matrice de confusion normalisée (figure \ref{fig:confusion_v1}) illustre les deux types d'erreurs dominants du modèle. D'une part, la ligne \textit{background} est très chargée : la grande majorité des instances de carotte ($\sim$67\%), d'aubergine ($\sim$91\%) et de radis ($\sim$79\%) sont prédites comme arrière-plan, ce qui explique les recalls très faibles de ces classes ($\sim$33\%, $\sim$9\% et $\sim$18\% respectivement). D'autre part, la colonne \textit{background} révèle un taux significatif de faux positifs pour la carotte : le modèle détecte des carottes là où il n'y en a pas, probablement en confondant des formes allongées en arrière-plan. La pomme de terre et la tomate affichent en revanche une diagonale nette, confirmant leur bonne détection.
+
+Au-delà des erreurs vers l'arrière-plan, la matrice révèle également des confusions inter-classes. La plus notable concerne le citron : 21\,\% de ses instances sont prédites comme des radis, ces deux classes partageant une silhouette ronde à taille comparable. Par ailleurs, 5\,\% des instances de citron sont prédites comme des carottes, vraisemblablement en raison d'une teinte jaune-orangée commune. Dans le même sens, la pomme de terre et le citron s'échangent ponctuellement (2 à 5\,\%), leur couleur claire et leur silhouette sphérique induisant le modèle en erreur. En revanche, la carotte et l'aubergine ne génèrent quasiment aucune confusion inter-classe : leurs instances sont directement manquées (prédites comme fond) plutôt que mal classifiées, ce qui suggère que ces classes sont tout simplement trop peu représentées pour que le modèle ait appris leurs caractéristiques visuelles distinctives.
+
+\subsection{Modèle v2 — YOLOv8s (améliorations)}
+
+Pour la version 2, nous avons utilisé YOLOv8s (11 millions de paramètres) avec des hyperparamètres optimisés : la phase 2 a été étendue à 80 epochs avec une patience de 20, des augmentations supplémentaires ont été appliquées (rotation $\pm15°$, flip vertical, mixup) et un label smoothing de 0.1 a été introduit pour limiter la sur-confiance du modèle sur des annotations éventuellement bruitées.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Split} & \textbf{mAP@50} & \textbf{mAP@50-95} & \textbf{Précision} & \textbf{Recall} \\
+\midrule
+Validation & 0.5650 & 0.3652 & 0.6142 & 0.5265 \\
+Test       & 0.3546 & 0.1982 & 0.3307 & 0.4579 \\
+\bottomrule
+\end{tabular}
+\caption{Métriques v2 (YOLOv8s)}
+\end{table}
+
+Le modèle YOLOv8s progresse nettement en validation (+7 pts mAP@50 par rapport au YOLOv8n), mais chute fortement sur le test (0.35 contre 0.46). Cet écart important entre validation et test est le signe d'un surapprentissage : le modèle a appris à performer sur les 36 images de validation, sans généraliser au test.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{img/v2_results.png}
+    \caption{Courbes d'entraînement — YOLOv8s (phase 2)}
+    \label{fig:courbes_v2}
+\end{figure}
+
+\begin{itemize}
+    \item \textbf{Losses sur les données d'entraînement} : les trois courbes diminuent sur l'ensemble des 80 epochs, ce qui montre que le modèle continue d'apprendre efficacement sur le dataset d'entraînement, de façon plus prolongée que dans la version 1.
+
+    \item \textbf{Losses sur les données de validation} : le comportement diffère nettement. La val/box\_loss et la val/dfl\_loss diminuent jusqu'aux alentours de l'epoch 40, puis augmentent progressivement — signe de surapprentissage. Le modèle améliore encore ses performances sur le train, mais commence à se dégrader sur la validation.
+
+    \item \textbf{Précision et recall} : la précision oscille, traduisant une instabilité des prédictions sur un jeu de validation très restreint. Le recall progresse de manière plus régulière, mais reste affecté par cette variabilité.
+
+    \item \textbf{mAP@50 et mAP@50-95} : les deux métriques augmentent jusqu'à environ l'epoch 50, puis atteignent un plateau et montrent parfois une légère régression. Le fait que ce plateau soit atteint bien avant la fin des 80 epochs confirme que le modèle commence à surapprendre au-delà d'un certain point.
+\end{itemize}
+
+En résumé, les courbes de la version 2 illustrent clairement un phénomène de surapprentissage : les performances en validation s'améliorent initialement, puis se dégradent malgré la poursuite de l'optimisation sur les données d'entraînement.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{img/v2_confusion_matrix_normalized.png}
+    \caption{Matrice de confusion normalisée — YOLOv8s (test)}
+    \label{fig:confusion_v2}
+\end{figure}
+
+La matrice de confusion normalisée du modèle v2 (figure \ref{fig:confusion_v2}) révèle un profil très contrasté. Deux classes se distinguent nettement : le citron ($\sim$95\% de recall) et la pomme de terre ($\sim$91\%), dont la quasi-totalité des instances sont correctement localisées et classifiées. À l'opposé, la carotte ($\sim$24\%) et l'aubergine ($\sim$19\%) restent très mal détectées — leur ligne \textit{background} est chargée à respectivement 75\,\% et 81\,\%, confirmant que le modèle les rate massivement. Le radis progresse légèrement par rapport au v1 ($\sim$30\% contre $\sim$18\%), mais 70\,\% de ses instances sont encore prédites comme arrière-plan.
+
+Au niveau des faux positifs, le radis se démarque : 40\,\% de ses prédictions sont des faux positifs (colonne \textit{background}), soit le taux le plus élevé parmi toutes les classes. La carotte présente également un taux notable de 28\,\%, le modèle confondant des formes allongées en arrière-plan avec cette classe. En revanche, les confusions inter-classes sont quasi inexistantes : seules de légères confusions apparaissent entre la tomate et la carotte (1\,\%), et entre la tomate et la pomme de terre (1\,\%). Le modèle v2 a donc simplifié ses erreurs — presque tout se résume à des détections manquées vers l'arrière-plan — mais au prix d'un recall très inégal selon les classes, signe typique d'un surapprentissage sur les exemples de validation les plus représentatifs.
+
+\subsection{Comparaison et sélection du modèle}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Modèle} & \textbf{mAP@50 val} & \textbf{mAP@50 test} & \textbf{Précision} & \textbf{Recall} \\
+\midrule
+v1 — YOLOv8n & 0.4935 & \textbf{0.4552} & 0.5015 & 0.4313 \\
+v2 — YOLOv8s & 0.5650 & 0.3546          & 0.3307 & 0.4579 \\
+\bottomrule
+\end{tabular}
+\caption{Comparaison v1 vs v2 sur validation et test}
+\label{tab:comparaison}
+\end{table}
+
+Bien que le v2 obtienne de meilleures métriques de validation, il se dégrade significativement sur le test. Cet écart révèle un surapprentissage : avec seulement 166 images d'entraînement, YOLOv8s (11 millions de paramètres) est trop grand et mémorise les patterns de validation. YOLOv8n reste donc mieux adapté à la taille de notre dataset.
+
+\subsection{Analyse des résultats (YOLOv8n retenu)}
+
+\subsubsection*{Cas de succès}
+
+La pomme de terre (AP@50 = 0.70, recall $\sim$83\%) et le citron (AP@50 = 0.53, recall $\sim$58\%) sont les classes les mieux détectées. Ces éléments présentent des caractéristiques visuelles distinctives : forme ronde et couleur jaune vif pour le citron, texture particulière pour la pomme de terre, qui facilitent l'apprentissage.
+
+\subsubsection*{Erreurs courantes}
+
+Le radis (AP@50 = 0.28) et la carotte (AP@50 = 0.33) sont les classes les plus problématiques. L'analyse de la matrice de confusion (figure \ref{fig:confusion_v1}) révèle deux types d'erreurs principaux :
+\begin{itemize}
+    \item \textbf{Faux négatifs} : le modèle rate beaucoup d'objets, notamment les radis (petits objets peu distinctifs, $\sim$18\% de recall) et les aubergines ($\sim$9\% de recall, visuellement complexes sur fond sombre) — la quasi-totalité des instances de ces deux classes sont manquées.
+    \item \textbf{Faux positifs sur la carotte} : le modèle génère un nombre significatif de détections fantômes, confondant des formes allongées en arrière-plan avec des carottes.
+\end{itemize}
+
+Ces résultats s'expliquent principalement par la taille limitée du dataset ($\sim$28 images par classe pour l'entraînement) et l'hétérogénéité des sources (LVIS, Kaggle, Roboflow, collecte manuelle).
+
+% ============================================================
+\section{Conclusion}
+% ============================================================
+
+Ce projet a permis de mettre en place un pipeline complet de détection de légumes, allant de la constitution du dataset à l'évaluation de deux variantes de YOLOv8.
+L'approche de transfert learning en deux phases sur YOLOv8n a permis d'atteindre un mAP@50 de 0.46 sur le jeu de test, malgré un dataset relativement petit de seulement 166 images.
+
+Nos analyses montrent que la taille du modèle doit être adaptée à celle du dataset : un modèle trop volumineux sur un petit jeu de données risque le surapprentissage.
+
+Pour améliorer significativement les performances, il serait nécessaire d'augmenter le dataset à au moins 600 images, en ciblant particulièrement les classes les moins représentées comme le radis, l'aubergine et la carotte.
+
+Il serait également important d'homogénéiser les annotations, car la qualité variable des sources hétérogènes pourrait pénaliser l'apprentissage.
+
+Enfin, le modèle YOLOv8s devrait être testé uniquement une fois que le dataset est suffisamment large, idéalement au-delà de 400 images, afin d'éviter le surapprentissage.
+
+% ============================================================
+\newpage
+\section*{Sources du dataset}
+\addcontentsline{toc}{section}{Sources du dataset}
+% ============================================================
+
+\begin{itemize}[label=\textbullet]
+
+    \item \textbf{Fruit and Vegetable} — Roboflow Universe \\
+    \url{https://universe.roboflow.com/cse299/fruit-and-vegetable/}
+
+    \item \textbf{LVIS Fruits and Vegetables Dataset} — Kaggle \\
+    \url{https://www.kaggle.com/datasets/henningheyen/lvis-fruits-and-vegetables-dataset}
+
+\end{itemize}
+
+\end{document}
