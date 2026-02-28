@@ -119,9 +119,17 @@ PrimeurVision/
 │   ├── train_yolov8.ipynb     # Entraînement (config v2 documentée)
 │   └── evaluate_yolov8.ipynb  # Évaluation sur le jeu de test (modèle v1)
 ├── scripts/
-│   └── review_grid.py         # Interface Streamlit de curation
+│   ├── review_grid.py         # Interface Streamlit de curation
+│   ├── augment_dataset.py     # Augmentation des classes sous-représentées
+│   ├── create_dataset.py      # Construction et split du dataset
+│   └── validate_dataset.py    # Vérification cohérence images/labels
 └── docs/
-    └── resultats.md            # Analyse complète des résultats
+    ├── rapport_primeurvision.tex          # Source LaTeX du rapport
+    ├── rapport_PrimeurVision.pdf          # Rapport final
+    ├── img/
+    │   ├── predictions_reussies.png       # Top 3 prédictions (qualitatif)
+    │   └── predictions_difficiles.png     # 3 cas difficiles (qualitatif)
+    └── resultats.md                       # Analyse des résultats
 ```
 
 ---
