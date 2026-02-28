@@ -427,6 +427,15 @@ Bien que le v2 obtienne de meilleures métriques de validation, il se dégrade s
 
 La pomme de terre (AP@50 = 0.70, recall $\sim$83\%) et le citron (AP@50 = 0.53, recall $\sim$58\%) sont les classes les mieux détectées. Ces éléments présentent des caractéristiques visuelles distinctives : forme ronde et couleur jaune vif pour le citron, texture particulière pour la pomme de terre, qui facilitent l'apprentissage.
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{img/predictions_reussies.png}
+    \caption{Les trois prédictions les mieux réussies sur le jeu de test (YOLOv8n, conf $\geq$ 0.25)}
+    \label{fig:pred_reussies}
+\end{figure}
+
+La figure \ref{fig:pred_reussies} illustre trois images où le modèle parvient à localiser et classifier correctement l'ensemble des instances présentes (score = 1.09). Les deux premières — tomates sur fond blanc neutre, citrons sur fond noir — bénéficient d'un objet bien isolé et d'un contraste élevé, conditions idéales pour la détection. La troisième montre que le modèle reste robuste face à une augmentation agressive (rotation, teinte modifiée), avec des scores de confiance élevés (>0.80) malgré la dégradation visuelle.
+
 \subsubsection*{Erreurs courantes}
 
 Le radis (AP@50 = 0.28) et la carotte (AP@50 = 0.33) sont les classes les plus problématiques. L'analyse de la matrice de confusion (figure \ref{fig:confusion_v1}) révèle deux types d'erreurs principaux :
@@ -434,6 +443,15 @@ Le radis (AP@50 = 0.28) et la carotte (AP@50 = 0.33) sont les classes les plus p
     \item \textbf{Faux négatifs} : le modèle rate beaucoup d'objets, notamment les radis (petits objets peu distinctifs, $\sim$18\% de recall) et les aubergines ($\sim$9\% de recall, visuellement complexes sur fond sombre) — la quasi-totalité des instances de ces deux classes sont manquées.
     \item \textbf{Faux positifs sur la carotte} : le modèle génère un nombre significatif de détections fantômes, confondant des formes allongées en arrière-plan avec des carottes.
 \end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{img/predictions_difficiles.png}
+    \caption{Les trois prédictions les plus difficiles sur le jeu de test — classes manquées ou score de confiance très faible (YOLOv8n)}
+    \label{fig:pred_difficiles}
+\end{figure}
+
+La figure \ref{fig:pred_difficiles} présente trois profils d'échec distincts. La première image illustre un faux négatif total (score = 0.00) : un citron partiellement visible dans une scène de cuisine très chargée n'est pas détecté, le modèle étant perturbé par la richesse de l'arrière-plan. La deuxième révèle une confusion de classe (score = 0.04) : sur une image fortement bruitée, les objets sont prédits comme des tomates (conf. 0.29--0.50) plutôt que des citrons — deux classes à silhouette ronde similaire dont la distinction devient difficile après augmentation agressive. La troisième montre une détection partielle (score = 0.48) : dans une scène multi-classes, les citrons sont correctement identifiés mais l'aubergine est totalement manquée, ce qui illustre la difficulté persistante du modèle sur cette classe sous-représentée ($\sim$9\% de recall).
 
 Ces résultats s'expliquent principalement par la taille limitée du dataset ($\sim$28 images par classe pour l'entraînement) et l'hétérogénéité des sources (LVIS, Kaggle, Roboflow, collecte manuelle).
 
